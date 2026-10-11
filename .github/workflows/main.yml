@@ -30,30 +30,30 @@ jobs:
           New-Item -ItemType Directory -Path $mountPath -Force | Out-Null
           Mount-WindowsImage -ImagePath $wimPath -Index 1 -Path $mountPath -Optimize
 
-          # 1. 猎杀 Defender 和系统恢复 (UTM 不需要)
+          # 1. 猎杀 Defender 和系统恢复
           Get-WindowsPackage -Path $mountPath | Where-Object { 
             $_.PackageName -match "Defender|WinRE" 
           } | Remove-WindowsPackage -Path $mountPath -ErrorAction SilentlyContinue
 
-          # 2. 猎杀所有广告 Appx (Xbox, Edge, OneDrive 等)
-          Get-AppxProvisionedPackage -Path $mountPath | Remove-AppxProvisionedPackage -Path $mountPath -ErrorAction SilentlyContinue
+          # 2. 猎杀所有广告 Appx (修复：逐个检查，失败就跳过，绝不崩溃)
+          $appxPackages = Get-AppxProvisionedPackage -Path $mountPath
+          foreach ($pkg in $appxPackages) {
+            Write-Host "尝试移除: $($pkg.DisplayName)"
+            Remove-AppxProvisionedPackage -Path $mountPath -PackageName $pkg.PackageName -ErrorAction SilentlyContinue
+          }
 
-          # 3. 猎杀非中文语言包和多余字体 (省 1GB+)
+          # 3. 猎杀非中文和英文的语言包
           Get-WindowsPackage -Path $mountPath | Where-Object { 
             $_.PackageName -match "LanguagePack|Fonts" -and $_.PackageName -notmatch "zh-CN|en-US" 
           } | Remove-WindowsPackage -Path $mountPath -ErrorAction SilentlyContinue
 
-          # 4. 清理 WinSxS 旧组件 (保留当前驱动和系统文件，只清理旧备份)
+          # 4. 清理 WinSxS 旧组件
           dism.exe /Image:$mountPath /Cleanup-Image /StartComponentCleanup /ResetBase
-
-          # 5. 关闭休眠 (省掉巨大的 hiberfil.sys)
-          # 注意：离线挂载状态下无法直接用 powercfg，需通过注册表控制，这里省略，装好后再关也行。
 
           Dismount-WindowsImage -Path $mountPath -Save
 
       - name: 4. 终极压缩 (LZX 最大压缩率重新导出)
         run: |
-          # 这是压榨体积的终极杀器，会把 WIM 重新打包成最高压缩比
           $wimPath = "C:\Tiny10-ISO\sources\install.wim"
           $newWimPath = "C:\Tiny10-ISO\sources\install_new.wim"
           Export-WindowsImage -SourceImagePath $wimPath -SourceIndex 1 -DestinationImagePath $newWimPath -CompressionType Maximum
