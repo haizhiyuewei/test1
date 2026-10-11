@@ -25,37 +25,7 @@ jobs:
           Copy-Item -Path "${winDrive}:\*" -Destination "C:\Tiny10-ISO" -Recurse -Force
           Dismount-DiskImage -ImagePath $winIso.FullName
 
-      - name: 3. 下载并注入 VirtIO 驱动 (使用 curl 修复下载)
-        run: |
-          # 修复：使用 curl.exe 替代 Invoke-WebRequest，防止下载损坏
-          curl.exe -L -o virtio-win.iso "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
-          
-          $virtMount = Mount-DiskImage -ImagePath "$((Get-Item 'virtio-win.iso').FullName)" -PassThru
-          $virtDrive = ($virtMount | Get-Volume).DriveLetter
-
-          $wimPath = "C:\Tiny10-ISO\sources\install.wim"
-          $mountPath = "C:\Mount"
-          New-Item -ItemType Directory -Path $mountPath -Force | Out-Null
-          Mount-WindowsImage -ImagePath $wimPath -Index 1 -Path $mountPath
-
-          $driverBase = "${virtDrive}:\"
-          $driverPaths = @(
-            "${driverBase}\viostor\x86",
-            "${driverBase}\vioscsi\x86",
-            "${driverBase}\NetKVM\x86",
-            "${driverBase}\Balloon\x86"
-          )
-          foreach ($driverPath in $driverPaths) {
-            if (Test-Path $driverPath) {
-              Write-Host "注入驱动: $driverPath"
-              Add-WindowsDriver -Path $mountPath -Driver $driverPath -Recurse
-            }
-          }
-
-          Dismount-WindowsImage -Path $mountPath -Save
-          Dismount-DiskImage -ImagePath $virtMount.ImagePath
-
-      - name: 4. 重新打包 ISO
+      - name: 3. 使用 oscdimg 重新打包 ISO
         run: |
           $oscdimg = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits" -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $oscdimg) {
@@ -69,18 +39,14 @@ jobs:
           $efisys = "C:\Tiny10-ISO\efi\microsoft\boot\efisys.bin"
           & $oscdimg.FullName -m -o -u2 -udfver102 -bootdata:2#p0,e,b"$etfsboot"#pEF,e,b"$efisys" -l"Tiny10_x86" "C:\Tiny10-ISO" "C:\Tiny10_x86.iso"
 
-      - name: 5. 使用 7-Zip 自动分卷压缩 (绕过 2GB 限制)
+      - name: 4. 使用 7-Zip 自动分卷压缩 (绕过 2GB 限制)
         run: |
           $isoPath = "C:\Tiny10_x86.iso"
-          $isoSize = (Get-Item $isoPath).Length
-          Write-Host "最终 ISO 大小: $([math]::Round($isoSize / 1GB, 2)) GB"
-
-          # 使用 7-Zip 拆分为 1.9GB 的分卷
           $sevenZip = "C:\Program Files\7-Zip\7z.exe"
           if (-not (Test-Path $sevenZip)) { $sevenZip = "${env:ProgramFiles}\7-Zip\7z.exe" }
           & $sevenZip a -v1900m "C:\Tiny10_x86.7z" $isoPath
 
-      - name: 6. 上传构建产物
+      - name: 5. 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: Tiny10-x86-ISO
