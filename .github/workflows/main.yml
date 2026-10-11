@@ -35,11 +35,15 @@ jobs:
             $_.PackageName -match "Defender|WinRE" 
           } | Remove-WindowsPackage -Path $mountPath -ErrorAction SilentlyContinue
 
-          # 2. 猎杀所有广告 Appx (修复：逐个检查，失败就跳过，绝不崩溃)
+          # 2. 猎杀所有广告 Appx (终极容错防弹版)
           $appxPackages = Get-AppxProvisionedPackage -Path $mountPath
           foreach ($pkg in $appxPackages) {
-            Write-Host "尝试移除: $($pkg.DisplayName)"
-            Remove-AppxProvisionedPackage -Path $mountPath -PackageName $pkg.PackageName -ErrorAction SilentlyContinue
+            try {
+              Write-Host "尝试移除: $($pkg.DisplayName)"
+              Remove-AppxProvisionedPackage -Path $mountPath -PackageName $pkg.PackageName -ErrorAction Stop
+            } catch {
+              Write-Host "跳过 $($pkg.DisplayName) (受系统保护或无法移除)"
+            }
           }
 
           # 3. 猎杀非中文和英文的语言包
