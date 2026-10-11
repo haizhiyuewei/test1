@@ -10,8 +10,9 @@ jobs:
     steps:
       - name: 1. 下载官方 Win10 x86 简体中文 ISO (使用 Fido)
         run: |
-          Invoke-WebRequest -Uri "https://github.com/pbatard/Fido/releases/latest/download/Fido.ps1" -OutFile "Fido.ps1"
-          # 使用 Fido 自动下载 Win10 22H2 专业版 x86 简体中文
+          # 修复：使用 raw.githubusercontent.com 直接拉取脚本，避免 GitHub 重定向返回 HTML
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1" -OutFile "Fido.ps1"
+          # 运行 Fido 脚本，自动下载 Win10 22H2 x86 专业版 简体中文
           .\Fido.ps1 -Win 10 -Rel 22H2 -Ed Professional -Lang "Chinese (Simplified)" -Arch x86
 
       - name: 2. 挂载 ISO 并复制文件
