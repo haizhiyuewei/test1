@@ -19,8 +19,8 @@ jobs:
 
       - name: 构建 Win10 22H2 x86 简体中文 ISO
         run: |
-          # 修正：去掉了不被识别的 --arch 参数，将 x86 写进搜索词
-          python -m uup_builder build --search "Windows 10 22H2 x86" --lang zh-cn --edition professional --out ./UUPs --concurrency 8 --compress wim
+          # 注意：这里加入了 echo "1" | 强行应答它的交互式菜单
+          echo "1" | python -m uup_builder build --search "Windows 10 22H2 x86" --lang zh-cn --edition professional --out ./UUPs --concurrency 8 --compress wim
 
       - name: 注入 VirtIO 驱动
         run: |
