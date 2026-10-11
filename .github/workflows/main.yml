@@ -8,33 +8,29 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: 设置 Python 环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: 安装 uup-builder
+      - name: 1. 下载官方 Win10 x86 简体中文 ISO (使用 Fido)
         run: |
-          pip install uup-builder
+          Invoke-WebRequest -Uri "https://github.com/pbatard/Fido/releases/latest/download/Fido.ps1" -OutFile "Fido.ps1"
+          # 使用 Fido 自动下载 Win10 22H2 专业版 x86 简体中文
+          .\Fido.ps1 -Win 10 -Rel 22H2 -Ed Professional -Lang "Chinese (Simplified)" -Arch x86
 
-      - name: 构建 Win10 22H2 x86 简体中文 ISO
+      - name: 2. 挂载 ISO 并复制文件
         run: |
-          # 注意：这里加入了 echo "1" | 强行应答它的交互式菜单
-          echo "1" | python -m uup_builder build --search "Windows 10 22H2 x86" --lang zh-cn --edition professional --out ./UUPs --concurrency 8 --compress wim
+          $winIso = Get-ChildItem -Path . -Filter "*.iso" | Select-Object -First 1
+          if (-not $winIso) { Write-Error "Fido 未能下载 ISO"; exit 1 }
+          Write-Host "下载的 ISO: $($winIso.FullName)"
 
-      - name: 注入 VirtIO 驱动
-        run: |
-          Invoke-WebRequest -Uri "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso" -OutFile "virtio-win.iso"
-          $winIso = Get-ChildItem -Path . -Filter "*.iso" | Where-Object { $_.Name -notlike "*virtio*" } | Select-Object -First 1
-          if (-not $winIso) { Write-Error "未找到 Windows ISO 文件"; exit 1 }
-          
           $winMount = Mount-DiskImage -ImagePath $winIso.FullName -PassThru
           $winDrive = ($winMount | Get-Volume).DriveLetter
-          $virtMount = Mount-DiskImage -ImagePath "$((Get-Item 'virtio-win.iso').FullName)" -PassThru
-          $virtDrive = ($virtMount | Get-Volume).DriveLetter
-
           New-Item -ItemType Directory -Path "C:\Tiny10-ISO" -Force | Out-Null
           Copy-Item -Path "${winDrive}:\*" -Destination "C:\Tiny10-ISO" -Recurse -Force
+          Dismount-DiskImage -ImagePath $winIso.FullName
+
+      - name: 3. 下载并注入 VirtIO 驱动
+        run: |
+          Invoke-WebRequest -Uri "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso" -OutFile "virtio-win.iso"
+          $virtMount = Mount-DiskImage -ImagePath "$((Get-Item 'virtio-win.iso').FullName)" -PassThru
+          $virtDrive = ($virtMount | Get-Volume).DriveLetter
 
           $wimPath = "C:\Tiny10-ISO\sources\install.wim"
           $mountPath = "C:\Mount"
@@ -50,15 +46,15 @@ jobs:
           )
           foreach ($driverPath in $driverPaths) {
             if (Test-Path $driverPath) {
+              Write-Host "注入驱动: $driverPath"
               Add-WindowsDriver -Path $mountPath -Driver $driverPath -Recurse
             }
           }
 
           Dismount-WindowsImage -Path $mountPath -Save
           Dismount-DiskImage -ImagePath $virtMount.ImagePath
-          Dismount-DiskImage -ImagePath $winMount.ImagePath
 
-      - name: 重新打包 ISO
+      - name: 4. 重新打包 ISO
         run: |
           $oscdimg = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits" -Filter "oscdimg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $oscdimg) {
@@ -72,7 +68,7 @@ jobs:
           $efisys = "C:\Tiny10-ISO\efi\microsoft\boot\efisys.bin"
           & $oscdimg.FullName -m -o -u2 -udfver102 -bootdata:2#p0,e,b"$etfsboot"#pEF,e,b"$efisys" -l"Tiny10_x86" "C:\Tiny10-ISO" "C:\Tiny10_x86.iso"
 
-      - name: 上传构建产物
+      - name: 5. 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: Tiny10-x86-ISO
