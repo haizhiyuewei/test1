@@ -1,4 +1,4 @@
-name: Build Tiny10 x86 Extreme UTM
+name: Build Tiny10 x86 Single ISO
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
           Copy-Item -Path "${winDrive}:\*" -Destination "C:\Tiny10-ISO" -Recurse -Force
           Dismount-DiskImage -ImagePath $winIso.FullName
 
-      - name: 3. 精准外科手术 (暴力精简但保留驱动)
+      - name: 3. 精准外科手术 (暴力精简)
         run: |
           $wimPath = "C:\Tiny10-ISO\sources\install.wim"
           $mountPath = "C:\Mount"
@@ -30,30 +30,24 @@ jobs:
           New-Item -ItemType Directory -Path $mountPath -Force | Out-Null
           Mount-WindowsImage -ImagePath $wimPath -Index 1 -Path $mountPath -Optimize
 
-          # 1. 猎杀 Defender 和系统恢复
           Get-WindowsPackage -Path $mountPath | Where-Object { 
             $_.PackageName -match "Defender|WinRE" 
           } | Remove-WindowsPackage -Path $mountPath -ErrorAction SilentlyContinue
 
-          # 2. 猎杀所有广告 Appx (终极容错防弹版)
           $appxPackages = Get-AppxProvisionedPackage -Path $mountPath
           foreach ($pkg in $appxPackages) {
             try {
-              Write-Host "尝试移除: $($pkg.DisplayName)"
               Remove-AppxProvisionedPackage -Path $mountPath -PackageName $pkg.PackageName -ErrorAction Stop
             } catch {
-              Write-Host "跳过 $($pkg.DisplayName) (受系统保护或无法移除)"
+              Write-Host "跳过受保护的包"
             }
           }
 
-          # 3. 猎杀非中文和英文的语言包
           Get-WindowsPackage -Path $mountPath | Where-Object { 
             $_.PackageName -match "LanguagePack|Fonts" -and $_.PackageName -notmatch "zh-CN|en-US" 
           } | Remove-WindowsPackage -Path $mountPath -ErrorAction SilentlyContinue
 
-          # 4. 清理 WinSxS 旧组件
           dism.exe /Image:$mountPath /Cleanup-Image /StartComponentCleanup /ResetBase
-
           Dismount-WindowsImage -Path $mountPath -Save
 
       - name: 4. 终极压缩 (LZX 最大压缩率重新导出)
@@ -71,22 +65,23 @@ jobs:
             Start-Process -FilePath "adksetup.exe" -ArgumentList "/quiet /features OptionId.DeploymentTools" -Wait
             $oscdimg = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits" -Filter "oscdimg.exe" -Recurse | Select-Object -First 1
           }
-          $etfsboot = "C:\Tiny10-ISO\boot\etfsboot.com"
-          $efisys = "C:\Tiny10-ISO\efi\microsoft\boot\efisys.bin"
-          & $oscdimg.FullName -m -o -u2 -udfver102 -bootdata:2#p0,e,b"$etfsboot"#pEF,e,b"$efisys" -l"Tiny10_x86" "C:\Tiny10-ISO" "C:\Tiny10_x86.iso"
+          
+          # 修复引号问题，并直接生成单个 ISO
+          & $oscdimg.FullName --% -m -o -u2 -udfver102 -bootdata:2#p0,e,b"C:\Tiny10-ISO\boot\etfsboot.com"#pEF,e,b"C:\Tiny10-ISO\efi\microsoft\boot\efisys.bin" -l"Tiny10_x86" "C:\Tiny10-ISO" "C:\Tiny10_x86.iso"
 
-      - name: 6. 使用 7-Zip 自动分卷压缩
+      - name: 6. 检查大小并直接上传单文件
         run: |
-          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $sevenZip)) { $sevenZip = "${env:ProgramFiles}\7-Zip\7z.exe" }
-          & $sevenZip a -v1900m "C:\Tiny10_x86.7z" "C:\Tiny10_x86.iso"
-        continue-on-error: true
+          $isoPath = "C:\Tiny10_x86.iso"
+          $sizeGB = [math]::Round((Get-Item $isoPath).Length / 1GB, 2)
+          Write-Host "最终 ISO 大小: $sizeGB GB"
+          if ($sizeGB -gt 2.0) {
+            Write-Warning "警告：ISO 超过 2GB，上传可能会被 GitHub 拒绝！"
+          }
+        shell: pwsh
 
-      - name: 7. 上传产物
+      - name: 7. 上传最终产物
         uses: actions/upload-artifact@v4
         with:
-          name: Tiny10-x86-ISO
-          path: |
-            C:\Tiny10_x86.iso
-            C:\Tiny10_x86.7z.*
+          name: Tiny10-x86-完整ISO
+          path: C:\Tiny10_x86.iso
           retention-days: 7
